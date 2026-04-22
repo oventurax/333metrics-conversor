@@ -146,11 +146,13 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
+  const fmt = v => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   // Data rows
   campaigns.forEach((c, idx) => {
     const fill = idx % 2 === 0 ? fills.white : fills.lightBlue;
-    const convCell = c.convValue > 0 ? c.convValue : null;
-    const costCell = c.cost > 0 ? c.cost : null;
+    const convCell = c.convValue > 0 ? fmt(c.convValue) : null;
+    const costCell = c.cost > 0 ? fmt(c.cost) : null;
 
     const row = ws.addRow([dateStr, dateStr, c.name, convCell, costCell]);
     for (let col = 1; col <= 5; col++) {
@@ -160,7 +162,6 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
       cell.border = border;
       cell.alignment = { vertical: 'middle' };
       if (col === 4 || col === 5) {
-        cell.numFmt = '#,##0.00';
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
       }
     }
@@ -172,8 +173,6 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   // Totals
   const totalSold  = campaigns.reduce((s, c) => s + (c.convValue > 0 ? c.convValue : 0), 0);
   const totalSpent = campaigns.reduce((s, c) => s + (c.cost > 0 ? c.cost : 0), 0);
-
-  const fmt = v => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const totalsRow = ws.addRow([null, null, null,
     `Total vendido: $${fmt(totalSold)}`,
