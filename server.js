@@ -33,15 +33,29 @@ function dateSuffix(d) {
   return `${dd}-${mm}-${d.getFullYear()}`;
 }
 
+// Converts "YYYY-MM-DD" → "DD/MM/YYYY", returns null if not matching
+function rawDateToStr(raw) {
+  if (raw && String(raw).trim().match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [yyyy, mm, dd] = String(raw).trim().split('-');
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  return null;
+}
+
 function parseCampaigns(rows, platform) {
   const header = rows[0].map(h => String(h).trim().toLowerCase());
 
   let colCampaign, colConvValue, colCost, colDateStart;
+  let colAdSet = -1, colAd = -1, colCurrency = -1;
 
   if (platform === 'facebook') {
-    // Facebook raw export: Portuguese column names, conversion value already in $
-    // Columns: Nome da campanha | Moeda | Valor de conversão da compra | Valor usado | Início dos relatórios | Encerramento dos relatórios
+    // New Facebook export format (Portuguese columns):
+    // Nome da campanha | Nome do conjunto de anúncios | Nome do anúncio | Moeda
+    // | Valor de conversão da compra | Valor usado | Início dos relatórios | Encerramento dos relatórios
     colCampaign  = header.findIndex(h => h.includes('nome da campanha'));
+    colAdSet     = header.findIndex(h => h.includes('nome do conjunto'));
+    colAd        = header.findIndex(h => h.includes('nome do anúncio') || h.includes('nome do anuncio'));
+    colCurrency  = header.findIndex(h => h === 'moeda' || (h.includes('moeda') && !h.includes('valor')));
     colConvValue = header.findIndex(h => h.includes('valor de convers'));
     colCost      = header.findIndex(h => h.includes('valor usado'));
     colDateStart = header.findIndex(h => h.includes('início dos relatórios') || h.includes('inicio dos relatorios'));
@@ -62,12 +76,8 @@ function parseCampaigns(rows, platform) {
   let fileDate = null;
   if (platform === 'facebook' && colDateStart !== -1) {
     for (let i = 1; i < rows.length; i++) {
-      const raw = String(rows[i][colDateStart] || '').trim();
-      if (raw.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [yyyy, mm, dd] = raw.split('-');
-        fileDate = `${dd}/${mm}/${yyyy}`;
-        break;
-      }
+      const d = rawDateToStr(rows[i][colDateStart]);
+      if (d) { fileDate = d; break; }
     }
   }
 
@@ -83,7 +93,15 @@ function parseCampaigns(rows, platform) {
     const cost      = parseFloat(row[colCost]) || 0;
     const convValue = platform === 'facebook' ? rawConv : rawConv * 230;
 
-    campaigns.push({ name, convValue, cost });
+    if (platform === 'facebook') {
+      const adSet    = String(row[colAdSet]    || '').trim();
+      const ad       = String(row[colAd]       || '').trim();
+      const currency = colCurrency !== -1 ? String(row[colCurrency] || '').trim() : '';
+      const rowDate  = colDateStart !== -1 ? rawDateToStr(row[colDateStart]) : null;
+      campaigns.push({ name, adSet, ad, currency, convValue, cost, rowDate });
+    } else {
+      campaigns.push({ name, convValue, cost });
+    }
   }
 
   return { campaigns, fileDate };
@@ -110,9 +128,12 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Worksheet');
 
-  ws.columns = [
-    { width: 18 }, { width: 22 }, { width: 45 }, { width: 28 }, { width: 22 },
-  ];
+  const isFB = platform === 'facebook';
+  const numCols = isFB ? 7 : 5;
+
+  ws.columns = isFB
+    ? [{ width: 18 }, { width: 10 }, { width: 42 }, { width: 38 }, { width: 38 }, { width: 22 }, { width: 22 }]
+    : [{ width: 18 }, { width: 22 }, { width: 45 }, { width: 28 }, { width: 22 }];
 
   const DARK_BLUE = '1F4E79';
   const LIGHT_BLUE = 'DCE6F1';
@@ -133,10 +154,11 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   };
 
   // Header row
-  const headerRow = ws.addRow([
-    'Início dos relatórios', 'Encerramento dos relatórios',
-    'Nome da campanha', 'Valor de conversão da compra', 'Valor usado (USD)',
-  ]);
+  const headerValues = isFB
+    ? ['Data', 'Moeda', 'Campanha', 'Conjunto', 'Anúncio', 'Faturado', 'Gasto']
+    : ['Início dos relatórios', 'Encerramento dos relatórios', 'Nome da campanha', 'Valor de conversão da compra', 'Valor usado (USD)'];
+
+  const headerRow = ws.addRow(headerValues);
   headerRow.height = 26.25;
   headerRow.eachCell(cell => {
     cell.fill = fills.header;
@@ -154,16 +176,19 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
     const convCell = c.convValue > 0 ? fmt(c.convValue) : null;
     const costCell = c.cost > 0 ? fmt(c.cost) : null;
 
-    const row = ws.addRow([dateStr, dateStr, c.name, convCell, costCell]);
-    for (let col = 1; col <= 5; col++) {
+    const rowValues = isFB
+      ? [c.rowDate || dateStr, c.currency, c.name, c.adSet, c.ad, convCell, costCell]
+      : [dateStr, dateStr, c.name, convCell, costCell];
+
+    const row = ws.addRow(rowValues);
+    for (let col = 1; col <= numCols; col++) {
       const cell = row.getCell(col);
       cell.fill = fill;
       cell.font = { name: 'Arial', size: 11 };
       cell.border = border;
       cell.alignment = { vertical: 'middle' };
-      if (col === 4 || col === 5) {
-        cell.alignment = { vertical: 'middle', horizontal: 'right' };
-      }
+      const isValueCol = isFB ? (col === 6 || col === 7) : (col === 4 || col === 5);
+      if (isValueCol) cell.alignment = { vertical: 'middle', horizontal: 'right' };
     }
   });
 
@@ -174,29 +199,36 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   const totalSold  = campaigns.reduce((s, c) => s + (c.convValue > 0 ? c.convValue : 0), 0);
   const totalSpent = campaigns.reduce((s, c) => s + (c.cost > 0 ? c.cost : 0), 0);
 
-  const totalsRow = ws.addRow([null, null, null,
-    `Total vendido: $${fmt(totalSold)}`,
-    `Total gasto: $${fmt(totalSpent)}`,
-  ]);
-  for (let col = 1; col <= 5; col++) {
+  const totalsValues = isFB
+    ? [null, null, null, null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`]
+    : [null, null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`];
+
+  const totalsRow = ws.addRow(totalsValues);
+  for (let col = 1; col <= numCols; col++) {
     const cell = totalsRow.getCell(col);
     cell.fill = fills.darkBlue;
     cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: WHITE } };
     cell.border = border;
-    cell.alignment = { vertical: 'middle', horizontal: col >= 4 ? 'center' : 'left' };
+    const isLabelCol = isFB ? col >= 6 : col >= 4;
+    cell.alignment = { vertical: 'middle', horizontal: isLabelCol ? 'center' : 'left' };
   }
 
   // Profit
   const profit = totalSold - totalSpent;
   const profitStr = profit >= 0 ? `$${fmt(profit)}` : `-$${fmt(Math.abs(profit))}`;
 
-  const profitRow = ws.addRow([null, null, null, 'LUCRO FINAL:', profitStr]);
-  for (let col = 1; col <= 5; col++) {
+  const profitValues = isFB
+    ? [null, null, null, null, null, 'LUCRO FINAL:', profitStr]
+    : [null, null, null, 'LUCRO FINAL:', profitStr];
+
+  const profitRow = ws.addRow(profitValues);
+  for (let col = 1; col <= numCols; col++) {
     const cell = profitRow.getCell(col);
     cell.fill = fills.cyan;
     cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: WHITE } };
     cell.border = border;
-    cell.alignment = { vertical: 'middle', horizontal: col >= 4 ? 'center' : 'left' };
+    const isLabelCol = isFB ? col >= 6 : col >= 4;
+    cell.alignment = { vertical: 'middle', horizontal: isLabelCol ? 'center' : 'left' };
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -225,7 +257,6 @@ app.post('/convert', upload.array('files', 5), async (req, res) => {
       results.push({ name: outName, data: buffer.toString('base64'), dateSuffix: dateSuffix(usedDate) });
     }
 
-    // dateSuffix for display: use first file's date (all files share same date)
     res.json({ files: results, dateSuffix: results[0].dateSuffix });
 
   } catch (err) {
