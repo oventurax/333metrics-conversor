@@ -303,29 +303,13 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
     }
 
-    .rename-row { display: flex; align-items: center; gap: 8px; }
-
-    .rename-input {
-      flex: 1; min-width: 0;
-      background: rgba(0,0,0,0.4);
-      border: 1.5px solid rgba(255,255,255,0.07);
-      border-radius: 7px;
-      color: var(--text); font-size: 13px;
-      padding: 8px 11px; font-family: inherit;
-      transition: border-color 0.2s;
-    }
-    .rename-input:focus { outline: none; border-color: var(--green-mid); box-shadow: 0 0 0 3px rgba(52,199,89,0.1); }
-    .rename-input::placeholder { color: var(--text-dim); }
-
-    .rename-suffix { font-size: 11px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
-
     .btn-download {
       display: flex; align-items: center; gap: 6px;
-      padding: 7px 13px;
+      padding: 9px 16px;
       background: linear-gradient(135deg, var(--green-neon), var(--green-mid));
       color: #fff; border: none; border-radius: 7px;
-      font-size: 12px; font-weight: 700; cursor: pointer;
-      white-space: nowrap; flex-shrink: 0;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      width: 100%; justify-content: center;
       transition: all 0.15s;
       box-shadow: 0 2px 10px rgba(59,165,64,0.25);
     }
@@ -336,18 +320,6 @@
       box-shadow: none; cursor: default;
       border: 1px solid rgba(59,165,64,0.3);
     }
-
-    .btn-download-all {
-      display: flex; align-items: center; justify-content: center; gap: 7px;
-      width: 100%; padding: 11px;
-      background: transparent;
-      color: var(--green-mid);
-      border: 1.5px solid rgba(52,199,89,0.4);
-      border-radius: 9px; font-size: 13px; font-weight: 600;
-      cursor: pointer; margin-top: 4px;
-      transition: all 0.15s; font-family: inherit;
-    }
-    .btn-download-all:hover { background: rgba(52,199,89,0.08); border-color: var(--green-mid); }
 
     .new-conversion {
       display: none; align-items: center; justify-content: center; gap: 6px;
@@ -435,11 +407,8 @@
 
       <!-- RESULTS PANEL -->
       <div class="results" id="resultsPanel">
-        <div class="results-header" id="resultsHeader">Planilhas convertidas</div>
+        <div class="results-header" id="resultsHeader">Planilha gerada</div>
         <div id="resultsList"></div>
-        <button class="btn-download-all" id="btnDownloadAll" style="display:none">
-          ⬇ Baixar todas
-        </button>
         <button class="new-conversion" id="btnNewConversion">
           ↩ Nova conversão
         </button>
@@ -465,8 +434,8 @@
         if (w >= base + range) dir = -1;
         if (w <= base - range) dir =  1;
         w += dir * speed;
-        const s = stops.map((p, i) => `${colors[i]} ${p}%`).join(', ');
-        el.style.background = `radial-gradient(${w}% ${w}% at 50% 20%, ${s})`;
+        const s = stops.map((p, i) => colors[i] + ' ' + p + '%').join(', ');
+        el.style.background = 'radial-gradient(' + w + '% ' + w + '% at 50% 20%, ' + s + ')';
         requestAnimationFrame(frame);
       }
       requestAnimationFrame(frame);
@@ -486,19 +455,17 @@
     const resultsPanel     = document.getElementById('resultsPanel');
     const resultsList      = document.getElementById('resultsList');
     const resultsHeader    = document.getElementById('resultsHeader');
-    const btnDownloadAll   = document.getElementById('btnDownloadAll');
     const btnNewConversion = document.getElementById('btnNewConversion');
     const btnTikTok        = document.getElementById('btnTikTok');
     const btnFacebook      = document.getElementById('btnFacebook');
 
-    let selectedFiles     = [];
-    let convertedFiles    = [];
-    let selectedPlatform  = 'tiktok';
-    let currentDateSuffix = '';
+    let selectedFiles    = [];
+    let convertedFile    = null;
+    let selectedPlatform = 'tiktok';
 
     // ── Platform selector ─────────────────────────────────────────
-    [btnTikTok, btnFacebook].forEach(btn => {
-      btn.addEventListener('click', () => {
+    [btnTikTok, btnFacebook].forEach(function(btn) {
+      btn.addEventListener('click', function() {
         selectedPlatform = btn.dataset.platform;
         btnTikTok.className   = 'platform-btn' + (selectedPlatform === 'tiktok'   ? ' active-tiktok'   : '');
         btnFacebook.className = 'platform-btn' + (selectedPlatform === 'facebook' ? ' active-facebook' : '');
@@ -509,11 +476,11 @@
     function getYesterdayStr() {
       const d = new Date();
       d.setDate(d.getDate() - 1);
-      return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
     }
-    dateHint.textContent = `Padrão automático: ${getYesterdayStr()}`;
+    dateHint.textContent = 'Padrão automático: ' + getYesterdayStr();
 
-    dateInput.addEventListener('input', e => {
+    dateInput.addEventListener('input', function(e) {
       let v = e.target.value.replace(/\D/g, '');
       if (v.length > 2) v = v.slice(0,2) + '/' + v.slice(2);
       if (v.length > 5) v = v.slice(0,5) + '/' + v.slice(5);
@@ -521,27 +488,27 @@
     });
 
     // ── Drag & drop ───────────────────────────────────────────────
-    dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', e => {
+    dropZone.addEventListener('dragover',  function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', function()  { dropZone.classList.remove('dragover'); });
+    dropZone.addEventListener('drop', function(e) {
       e.preventDefault();
       dropZone.classList.remove('dragover');
       addFiles(Array.from(e.dataTransfer.files));
     });
-    fileInput.addEventListener('change', () => { addFiles(Array.from(fileInput.files)); fileInput.value = ''; });
+    fileInput.addEventListener('change', function() { addFiles(Array.from(fileInput.files)); fileInput.value = ''; });
 
     function addFiles(newFiles) {
-      const valid = newFiles.filter(f => f.name.match(/\.xlsx?$/i));
+      const valid = newFiles.filter(function(f) { return f.name.match(/\.xlsx?$/i); });
       if (newFiles.length !== valid.length) showStatus('error', 'Arquivo(s) inválido(s) ignorado(s) — só .xlsx aceito.');
-      for (const f of valid) {
+      for (var i = 0; i < valid.length; i++) {
         if (selectedFiles.length >= 5) { showStatus('error', 'Limite de 5 arquivos atingido.'); break; }
-        if (!selectedFiles.find(x => x.name === f.name)) selectedFiles.push(f);
+        if (!selectedFiles.find(function(x) { return x.name === valid[i].name; })) selectedFiles.push(valid[i]);
       }
       renderFileList();
     }
 
     function removeFile(name) {
-      selectedFiles = selectedFiles.filter(f => f.name !== name);
+      selectedFiles = selectedFiles.filter(function(f) { return f.name !== name; });
       renderFileList();
       if (selectedFiles.length === 0) hideStatus();
     }
@@ -557,33 +524,32 @@
       }
       dropZone.classList.add('has-files');
       convertBtn.disabled = false;
-      selectedFiles.forEach(f => {
+      selectedFiles.forEach(function(f) {
         const item = document.createElement('div');
         item.className = 'file-item';
-        item.innerHTML = `
-          <span class="file-item-name" title="${f.name}">📄 ${f.name}</span>
-          <button class="file-item-remove" data-name="${f.name}">✕</button>`;
+        item.innerHTML = '<span class="file-item-name" title="' + f.name + '">📄 ' + f.name + '</span>' +
+          '<button class="file-item-remove" data-name="' + f.name + '">✕</button>';
         fileList.appendChild(item);
       });
       const n = selectedFiles.length;
-      fileCount.textContent = `${n} arquivo${n > 1 ? 's' : ''} selecionado${n > 1 ? 's' : ''}`;
-      btnLabel.textContent = n > 1 ? `Converter ${n} planilhas` : 'Converter';
+      fileCount.textContent = n + ' arquivo' + (n > 1 ? 's' : '') + ' selecionado' + (n > 1 ? 's' : '');
+      btnLabel.textContent  = n > 1 ? 'Converter ' + n + ' planilhas' : 'Converter';
     }
 
-    fileList.addEventListener('click', e => {
+    fileList.addEventListener('click', function(e) {
       const btn = e.target.closest('.file-item-remove');
       if (btn) removeFile(btn.dataset.name);
     });
 
     // ── Convert ───────────────────────────────────────────────────
-    convertBtn.addEventListener('click', async () => {
+    convertBtn.addEventListener('click', async function() {
       if (!selectedFiles.length) return;
       convertBtn.disabled = true;
       const n = selectedFiles.length;
-      showStatus('loading', `Convertendo ${n} planilha${n > 1 ? 's' : ''}...`);
+      showStatus('loading', 'Convertendo ' + n + ' planilha' + (n > 1 ? 's' : '') + '...');
 
       const formData = new FormData();
-      selectedFiles.forEach(f => formData.append('files', f));
+      selectedFiles.forEach(function(f) { formData.append('files', f); });
       formData.append('platform', selectedPlatform);
       if (dateInput.value.trim()) formData.append('date', dateInput.value.trim());
 
@@ -593,10 +559,9 @@
 
         if (!res.ok) { showStatus('error', json.error || 'Erro ao processar.'); convertBtn.disabled = false; return; }
 
-        convertedFiles    = json.files;
-        currentDateSuffix = json.dateSuffix;
+        convertedFile = json;
         showResults();
-      } catch {
+      } catch (err) {
         showStatus('error', 'Erro de conexão com o servidor.');
         convertBtn.disabled = false;
       }
@@ -606,65 +571,39 @@
     function showResults() {
       uploadPanel.classList.add('hidden');
       resultsList.innerHTML = '';
-      const n = convertedFiles.length;
-      resultsHeader.textContent = `${n} planilha${n > 1 ? 's' : ''} convertida${n > 1 ? 's' : ''} — defina o nome e baixe`;
+      resultsHeader.textContent = '✓ Planilha gerada com sucesso';
 
-      convertedFiles.forEach((file, idx) => {
-        const item = document.createElement('div');
-        item.className = 'result-item';
-        item.innerHTML = `
-          <div class="result-item-top">
-            <span style="font-size:15px">📄</span>
-            <span class="result-item-orig" title="${file.name}">${file.name}</span>
-          </div>
-          <div class="rename-row">
-            <input class="rename-input" data-idx="${idx}" type="text"
-              placeholder="Nome do produto ou oferta"
-              autocomplete="off" spellcheck="false" />
-            <span class="rename-suffix">_${currentDateSuffix}.xlsx</span>
-            <button class="btn-download" data-idx="${idx}">
-              <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 1v7M3.5 5.5l3 3 3-3M1 10h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              Baixar
-            </button>
-          </div>`;
-        resultsList.appendChild(item);
+      const item = document.createElement('div');
+      item.className = 'result-item';
+
+      const top = document.createElement('div');
+      top.className = 'result-item-top';
+      top.innerHTML = '<span style="font-size:15px">📄</span>' +
+        '<span class="result-item-orig" title="' + convertedFile.name + '">' + convertedFile.name + '</span>';
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'btn-download';
+      dlBtn.id = 'btnDownload';
+      dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 13 13" fill="none">' +
+        '<path d="M6.5 1v7M3.5 5.5l3 3 3-3M1 10h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '</svg> Baixar planilha';
+
+      dlBtn.addEventListener('click', function() {
+        triggerDownload(convertedFile, convertedFile.name);
+        dlBtn.innerHTML = '✓ Baixado';
+        dlBtn.classList.add('downloaded');
       });
 
-      btnDownloadAll.style.display = n > 1 ? 'flex' : 'none';
-      resultsPanel.style.display   = 'flex';
+      item.appendChild(top);
+      item.appendChild(dlBtn);
+      resultsList.appendChild(item);
+
+      resultsPanel.style.display     = 'flex';
       btnNewConversion.style.display = 'flex';
     }
 
-    function getCustomName(idx) {
-      const input    = resultsList.querySelector(`.rename-input[data-idx="${idx}"]`);
-      const typed    = input ? input.value.trim() : '';
-      const fallback = convertedFiles[idx].name.replace(/_\d{2}-\d{2}-\d{4}\.xlsx$/, '');
-      return `${typed || fallback}_${currentDateSuffix}.xlsx`;
-    }
-
-    resultsList.addEventListener('click', e => {
-      const btn = e.target.closest('.btn-download');
-      if (!btn || btn.classList.contains('downloaded')) return;
-      const idx = parseInt(btn.dataset.idx);
-      triggerDownload(convertedFiles[idx], getCustomName(idx));
-      btn.innerHTML = '✓ Baixado';
-      btn.classList.add('downloaded');
-    });
-
-    btnDownloadAll.addEventListener('click', () => {
-      convertedFiles.forEach((file, idx) => {
-        setTimeout(() => {
-          triggerDownload(file, getCustomName(idx));
-          const btn = resultsList.querySelectorAll('.btn-download')[idx];
-          if (btn) { btn.innerHTML = '✓ Baixado'; btn.classList.add('downloaded'); }
-        }, idx * 300);
-      });
-    });
-
     function triggerDownload(file, filename) {
-      const bytes = Uint8Array.from(atob(file.data), c => c.charCodeAt(0));
+      const bytes = Uint8Array.from(atob(file.data), function(c) { return c.charCodeAt(0); });
       const blob  = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url   = URL.createObjectURL(blob);
       const a     = document.createElement('a');
@@ -672,8 +611,8 @@
       URL.revokeObjectURL(url);
     }
 
-    btnNewConversion.addEventListener('click', () => {
-      selectedFiles = []; convertedFiles = [];
+    btnNewConversion.addEventListener('click', function() {
+      selectedFiles = []; convertedFile = null;
       resultsPanel.style.display     = 'none';
       btnNewConversion.style.display = 'none';
       uploadPanel.classList.remove('hidden');
@@ -685,7 +624,7 @@
     function showStatus(type, msg) {
       statusEl.className = 'status ' + type;
       statusEl.innerHTML = type === 'loading'
-        ? `<div class="spinner"></div><span>${msg}</span>` : msg;
+        ? '<div class="spinner"></div><span>' + msg + '</span>' : msg;
     }
     function hideStatus() { statusEl.className = 'status'; statusEl.style.display = 'none'; }
   </script>

@@ -33,13 +33,50 @@ function dateSuffix(d) {
   return `${dd}-${mm}-${d.getFullYear()}`;
 }
 
-// Converts "YYYY-MM-DD" → "DD/MM/YYYY", returns null if not matching
-function rawDateToStr(raw) {
-  if (raw && String(raw).trim().match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [yyyy, mm, dd] = String(raw).trim().split('-');
+// Normalize any date format to "DD/MM/YYYY":
+//   "YYYY-MM-DD"  → "DD/MM/YYYY"
+//   "MM/DD/YYYY"  → "DD/MM/YYYY"  (American — detected when 2nd part > 12)
+//   "DD/MM/YYYY"  → unchanged
+function normalizeDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+
+  // ISO format: YYYY-MM-DD
+  if (s.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [yyyy, mm, dd] = s.split('-');
     return `${dd}/${mm}/${yyyy}`;
   }
+
+  // Slash-separated: DD/MM/YYYY or MM/DD/YYYY
+  if (s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+    const [a, b, yyyy] = s.split('/');
+    const numA = parseInt(a, 10);
+    const numB = parseInt(b, 10);
+    // If b > 12, the second part is the day → American MM/DD/YYYY → swap
+    if (numB > 12) {
+      return `${b.padStart(2, '0')}/${a.padStart(2, '0')}/${yyyy}`;
+    }
+    // Otherwise treat as DD/MM/YYYY (Brazilian)
+    return `${a.padStart(2, '0')}/${b.padStart(2, '0')}/${yyyy}`;
+  }
+
   return null;
+}
+
+// Strip currency symbols/codes and parse as float.
+// Handles: $, €, R$, USD, EUR — and Brazilian decimal comma (1.200,50 → 1200.50)
+function parseNumber(val) {
+  if (val == null || val === '') return 0;
+  let s = String(val).trim();
+  s = s.replace(/R\$|USD|EUR|\$|€/g, '').trim();
+  // "1.200,50" → "1200.50"
+  if (s.includes(',') && s.includes('.')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (s.includes(',')) {
+    // "1200,50" → "1200.50"
+    s = s.replace(',', '.');
+  }
+  return parseFloat(s) || 0;
 }
 
 function parseCampaigns(rows, platform) {
@@ -49,9 +86,6 @@ function parseCampaigns(rows, platform) {
   let colAdSet = -1, colAd = -1, colCurrency = -1;
 
   if (platform === 'facebook') {
-    // New Facebook export format (Portuguese columns):
-    // Nome da campanha | Nome do conjunto de anúncios | Nome do anúncio | Moeda
-    // | Valor de conversão da compra | Valor usado | Início dos relatórios | Encerramento dos relatórios
     colCampaign  = header.findIndex(h => h.includes('nome da campanha'));
     colAdSet     = header.findIndex(h => h.includes('nome do conjunto'));
     colAd        = header.findIndex(h => h.includes('nome do anúncio') || h.includes('nome do anuncio'));
@@ -60,7 +94,7 @@ function parseCampaigns(rows, platform) {
     colCost      = header.findIndex(h => h.includes('valor usado'));
     colDateStart = header.findIndex(h => h.includes('início dos relatórios') || h.includes('inicio dos relatorios'));
   } else {
-    // TikTok raw export: English column names, conversions = quantity × 230
+    // TikTok: English columns, conversions = quantity × 230
     colCampaign  = header.findIndex(h => h.includes('campaign name') || h.includes('campaign'));
     colConvValue = header.findIndex(h => h.includes('conversions'));
     colCost      = header.findIndex(h => h.includes('cost'));
@@ -72,11 +106,11 @@ function parseCampaigns(rows, platform) {
     throw new Error(`Colunas não encontradas. Verifique se é uma planilha do ${plat}.`);
   }
 
-  // For Facebook: extract date from first valid data row (YYYY-MM-DD → DD/MM/YYYY)
+  // Extract date from first valid Facebook row
   let fileDate = null;
   if (platform === 'facebook' && colDateStart !== -1) {
     for (let i = 1; i < rows.length; i++) {
-      const d = rawDateToStr(rows[i][colDateStart]);
+      const d = normalizeDate(rows[i][colDateStart]);
       if (d) { fileDate = d; break; }
     }
   }
@@ -86,18 +120,18 @@ function parseCampaigns(rows, platform) {
     const row  = rows[i];
     const name = String(row[colCampaign] || '').trim();
 
-    // Skip: empty campaign name (Facebook total rows) or TikTok "Total of X" footer
+    // Skip empty campaign names (Meta totals row) or TikTok footer
     if (!name || name.toLowerCase().startsWith('total of')) continue;
 
-    const rawConv   = parseFloat(row[colConvValue]) || 0;
-    const cost      = parseFloat(row[colCost]) || 0;
+    const rawConv   = parseNumber(row[colConvValue]);
+    const cost      = parseNumber(row[colCost]);
     const convValue = platform === 'facebook' ? rawConv : rawConv * 230;
 
     if (platform === 'facebook') {
       const adSet    = String(row[colAdSet]    || '').trim();
       const ad       = String(row[colAd]       || '').trim();
       const currency = colCurrency !== -1 ? String(row[colCurrency] || '').trim() : '';
-      const rowDate  = colDateStart !== -1 ? rawDateToStr(row[colDateStart]) : null;
+      const rowDate  = colDateStart !== -1 ? normalizeDate(row[colDateStart]) : null;
       campaigns.push({ name, adSet, ad, currency, convValue, cost, rowDate });
     } else {
       campaigns.push({ name, convValue, cost });
@@ -107,38 +141,22 @@ function parseCampaigns(rows, platform) {
   return { campaigns, fileDate };
 }
 
-async function processFile(fileBuffer, originalName, reportDate, platform, userPickedDate) {
-  let dateStr = formatDate(reportDate);
-
-  const wb   = XLSX.read(fileBuffer, { type: 'buffer' });
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-
-  if (rows.length < 2) throw new Error(`"${originalName}": planilha sem dados.`);
-
-  const { campaigns, fileDate } = parseCampaigns(rows, platform);
-  if (campaigns.length === 0) throw new Error(`"${originalName}": nenhuma campanha encontrada.`);
-
-  // Facebook: if user didn't pick a date, use the date from the file itself
-  if (platform === 'facebook' && !userPickedDate && fileDate) {
-    reportDate = parseDate(fileDate);
-    dateStr = fileDate;
-  }
-
-  // ── Build formatted workbook ──────────────────────────────────────────────
+async function generateWorkbook(allCampaigns, reportDate, platform) {
+  const dateStr  = formatDate(reportDate);
   const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Worksheet');
+  const ws       = workbook.addWorksheet('Worksheet');
 
-  const isFB = platform === 'facebook';
+  const isFB    = platform === 'facebook';
   const numCols = isFB ? 7 : 5;
 
   ws.columns = isFB
     ? [{ width: 18 }, { width: 10 }, { width: 42 }, { width: 38 }, { width: 38 }, { width: 22 }, { width: 22 }]
     : [{ width: 18 }, { width: 22 }, { width: 45 }, { width: 28 }, { width: 22 }];
 
-  const DARK_BLUE = '1F4E79';
+  const DARK_BLUE  = '1F4E79';
   const LIGHT_BLUE = 'DCE6F1';
-  const CYAN = '17A8B8';
-  const WHITE = 'FFFFFFFF';
+  const CYAN       = '17A8B8';
+  const WHITE      = 'FFFFFFFF';
 
   const fills = {
     header:    { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + DARK_BLUE } },
@@ -171,8 +189,8 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   const fmt = v => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Data rows
-  campaigns.forEach((c, idx) => {
-    const fill = idx % 2 === 0 ? fills.white : fills.lightBlue;
+  allCampaigns.forEach((c, idx) => {
+    const fill     = idx % 2 === 0 ? fills.white : fills.lightBlue;
     const convCell = c.convValue > 0 ? fmt(c.convValue) : null;
     const costCell = c.cost > 0 ? fmt(c.cost) : null;
 
@@ -196,8 +214,8 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   ws.addRow([]);
 
   // Totals
-  const totalSold  = campaigns.reduce((s, c) => s + (c.convValue > 0 ? c.convValue : 0), 0);
-  const totalSpent = campaigns.reduce((s, c) => s + (c.cost > 0 ? c.cost : 0), 0);
+  const totalSold  = allCampaigns.reduce((s, c) => s + (c.convValue > 0 ? c.convValue : 0), 0);
+  const totalSpent = allCampaigns.reduce((s, c) => s + (c.cost > 0 ? c.cost : 0), 0);
 
   const totalsValues = isFB
     ? [null, null, null, null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`]
@@ -214,7 +232,7 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
   }
 
   // Profit
-  const profit = totalSold - totalSpent;
+  const profit    = totalSold - totalSpent;
   const profitStr = profit >= 0 ? `$${fmt(profit)}` : `-$${fmt(Math.abs(profit))}`;
 
   const profitValues = isFB
@@ -231,11 +249,7 @@ async function processFile(fileBuffer, originalName, reportDate, platform, userP
     cell.alignment = { vertical: 'middle', horizontal: isLabelCol ? 'center' : 'left' };
   }
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  const baseName = path.basename(originalName, path.extname(originalName));
-  const outName = `${baseName}_${dateSuffix(reportDate)}.xlsx`;
-
-  return { buffer, outName, usedDate: reportDate };
+  return workbook.xlsx.writeBuffer();
 }
 
 app.post('/convert', upload.array('files', 5), async (req, res) => {
@@ -244,20 +258,42 @@ app.post('/convert', upload.array('files', 5), async (req, res) => {
       return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
     }
 
-    const platform = req.body.platform === 'facebook' ? 'facebook' : 'tiktok';
-
+    const platform     = req.body.platform === 'facebook' ? 'facebook' : 'tiktok';
     const userPickedDate = !!(req.body.date && req.body.date.trim());
-    let reportDate = userPickedDate ? parseDate(req.body.date.trim()) : getYesterday();
+    let reportDate     = userPickedDate ? parseDate(req.body.date.trim()) : getYesterday();
 
-    const results = [];
+    const allCampaigns = [];
+
     for (const file of req.files) {
-      const { buffer, outName, usedDate } = await processFile(
-        file.buffer, file.originalname, reportDate, platform, userPickedDate
-      );
-      results.push({ name: outName, data: buffer.toString('base64'), dateSuffix: dateSuffix(usedDate) });
+      const wb   = XLSX.read(file.buffer, { type: 'buffer' });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+
+      if (rows.length < 2) throw new Error(`"${file.originalname}": planilha sem dados.`);
+
+      const { campaigns, fileDate } = parseCampaigns(rows, platform);
+      if (campaigns.length === 0) throw new Error(`"${file.originalname}": nenhuma campanha encontrada.`);
+
+      // Facebook: use the file's own date if the user didn't pick one
+      if (platform === 'facebook' && !userPickedDate && fileDate) {
+        reportDate = parseDate(fileDate);
+      }
+
+      allCampaigns.push(...campaigns);
     }
 
-    res.json({ files: results, dateSuffix: results[0].dateSuffix });
+    if (allCampaigns.length === 0) {
+      return res.status(400).json({ error: 'Nenhuma campanha encontrada nos arquivos enviados.' });
+    }
+
+    const buffer = await generateWorkbook(allCampaigns, reportDate, platform);
+    const suffix = dateSuffix(reportDate);
+    const outName = `${suffix}.xlsx`;
+
+    res.json({
+      name:       outName,
+      data:       buffer.toString('base64'),
+      dateSuffix: suffix,
+    });
 
   } catch (err) {
     console.error(err);
