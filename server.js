@@ -34,11 +34,23 @@ function dateSuffix(d) {
 }
 
 // Normalize any date format to "DD/MM/YYYY":
-//   "YYYY-MM-DD"  → "DD/MM/YYYY"
-//   "MM/DD/YYYY"  → "DD/MM/YYYY"  (American — detected when 2nd part > 12)
-//   "DD/MM/YYYY"  → unchanged
+//   Excel serial number (e.g. 46139)  → "DD/MM/YYYY"
+//   "YYYY-MM-DD"                      → "DD/MM/YYYY"
+//   "MM/DD/YYYY" (American)           → "DD/MM/YYYY"  (detected when 2nd part > 12)
+//   "DD/MM/YYYY"                      → unchanged
 function normalizeDate(raw) {
-  if (!raw) return null;
+  if (!raw && raw !== 0) return null;
+
+  // Excel serial date (stored as a number, e.g. 46139 = 27/04/2026)
+  // 25569 = Excel serial for Unix epoch (1970-01-01)
+  if (typeof raw === 'number' && raw > 40000 && raw < 70000) {
+    const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    const dd   = String(d.getUTCDate()).padStart(2, '0');
+    const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = d.getUTCFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
   const s = String(raw).trim();
 
   // ISO format: YYYY-MM-DD
@@ -50,7 +62,6 @@ function normalizeDate(raw) {
   // Slash-separated: DD/MM/YYYY or MM/DD/YYYY
   if (s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
     const [a, b, yyyy] = s.split('/');
-    const numA = parseInt(a, 10);
     const numB = parseInt(b, 10);
     // If b > 12, the second part is the day → American MM/DD/YYYY → swap
     if (numB > 12) {
@@ -94,11 +105,15 @@ function parseCampaigns(rows, platform) {
     colCost      = header.findIndex(h => h.includes('valor usado'));
     colDateStart = header.findIndex(h => h.includes('início dos relatórios') || h.includes('inicio dos relatorios'));
   } else {
-    // TikTok: English columns, conversions = quantity × 230
-    colCampaign  = header.findIndex(h => h.includes('campaign name') || h.includes('campaign'));
-    colConvValue = header.findIndex(h => h.includes('conversions'));
+    // TikTok — two possible formats:
+    //   Format A (TikTok Ads Manager): "Campaign Name", "Conversions", "Cost"
+    //             → convValue = conversions × 230
+    //   Format B (WL/internal report):  "Data", "Campaign", "Revenue", "Cost"
+    //             → convValue = Revenue as-is (already monetary)
+    colCampaign  = header.findIndex(h => h.includes('campaign name') || h === 'campaign');
+    colConvValue = header.findIndex(h => h.includes('conversions') || h === 'revenue');
     colCost      = header.findIndex(h => h.includes('cost'));
-    colDateStart = -1;
+    colDateStart = header.findIndex(h => h === 'data');
   }
 
   if (colCampaign === -1 || colConvValue === -1 || colCost === -1) {
@@ -106,9 +121,12 @@ function parseCampaigns(rows, platform) {
     throw new Error(`Colunas não encontradas. Verifique se é uma planilha do ${plat}.`);
   }
 
-  // Extract date from first valid Facebook row
+  // For TikTok Format B: "Revenue" column → use value directly (no × 230)
+  const isRevenueCol = platform === 'tiktok' && colConvValue !== -1 && header[colConvValue] === 'revenue';
+
+  // Extract date from first valid data row (Facebook always; TikTok Format B when "data" col found)
   let fileDate = null;
-  if (platform === 'facebook' && colDateStart !== -1) {
+  if (colDateStart !== -1) {
     for (let i = 1; i < rows.length; i++) {
       const d = normalizeDate(rows[i][colDateStart]);
       if (d) { fileDate = d; break; }
@@ -125,7 +143,8 @@ function parseCampaigns(rows, platform) {
 
     const rawConv   = parseNumber(row[colConvValue]);
     const cost      = parseNumber(row[colCost]);
-    const convValue = platform === 'facebook' ? rawConv : rawConv * 230;
+    // Facebook: use as-is; TikTok Format B (revenue): use as-is; TikTok Format A (conversions): × 230
+    const convValue = (platform === 'facebook' || isRevenueCol) ? rawConv : rawConv * 230;
 
     if (platform === 'facebook') {
       const adSet    = String(row[colAdSet]    || '').trim();
@@ -134,7 +153,8 @@ function parseCampaigns(rows, platform) {
       const rowDate  = colDateStart !== -1 ? normalizeDate(row[colDateStart]) : null;
       campaigns.push({ name, adSet, ad, currency, convValue, cost, rowDate });
     } else {
-      campaigns.push({ name, convValue, cost });
+      const rowDate = colDateStart !== -1 ? normalizeDate(row[colDateStart]) : null;
+      campaigns.push({ name, convValue, cost, rowDate });
     }
   }
 
@@ -196,7 +216,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
 
     const rowValues = isFB
       ? [c.rowDate || dateStr, c.currency, c.name, c.adSet, c.ad, convCell, costCell]
-      : [dateStr, dateStr, c.name, convCell, costCell];
+      : [c.rowDate || dateStr, c.rowDate || dateStr, c.name, convCell, costCell];
 
     const row = ws.addRow(rowValues);
     for (let col = 1; col <= numCols; col++) {
@@ -273,8 +293,8 @@ app.post('/convert', upload.array('files', 5), async (req, res) => {
       const { campaigns, fileDate } = parseCampaigns(rows, platform);
       if (campaigns.length === 0) throw new Error(`"${file.originalname}": nenhuma campanha encontrada.`);
 
-      // Facebook: use the file's own date if the user didn't pick one
-      if (platform === 'facebook' && !userPickedDate && fileDate) {
+      // Use the file's own date if the user didn't pick one (Facebook always; TikTok Format B)
+      if (!userPickedDate && fileDate) {
         reportDate = parseDate(fileDate);
       }
 
