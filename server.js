@@ -167,11 +167,11 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
   const ws       = workbook.addWorksheet('Worksheet');
 
   const isFB    = platform === 'facebook';
-  const numCols = isFB ? 7 : 5;
+  const numCols = isFB ? 7 : 4;
 
   ws.columns = isFB
     ? [{ width: 18 }, { width: 10 }, { width: 42 }, { width: 38 }, { width: 38 }, { width: 22 }, { width: 22 }]
-    : [{ width: 18 }, { width: 22 }, { width: 45 }, { width: 28 }, { width: 22 }];
+    : [{ width: 18 }, { width: 45 }, { width: 28 }, { width: 22 }];
 
   const DARK_BLUE  = '1F4E79';
   const LIGHT_BLUE = 'DCE6F1';
@@ -194,7 +194,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
   // Header row
   const headerValues = isFB
     ? ['Data', 'Moeda', 'Campanha', 'Conjunto', 'Anúncio', 'Faturado', 'Gasto']
-    : ['Início dos relatórios', 'Encerramento dos relatórios', 'Nome da campanha', 'Valor de conversão da compra', 'Valor usado (USD)'];
+    : ['Início dos relatórios', 'Nome da campanha', 'Valor de conversão da compra', 'Valor usado (USD)'];
 
   const headerRow = ws.addRow(headerValues);
   headerRow.height = 26.25;
@@ -216,7 +216,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
 
     const rowValues = isFB
       ? [c.rowDate || dateStr, c.currency, c.name, c.adSet, c.ad, convCell, costCell]
-      : [c.rowDate || dateStr, c.rowDate || dateStr, c.name, convCell, costCell];
+      : [c.rowDate || dateStr, c.name, convCell, costCell];
 
     const row = ws.addRow(rowValues);
     for (let col = 1; col <= numCols; col++) {
@@ -225,7 +225,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
       cell.font = { name: 'Arial', size: 11 };
       cell.border = border;
       cell.alignment = { vertical: 'middle' };
-      const isValueCol = isFB ? (col === 6 || col === 7) : (col === 4 || col === 5);
+      const isValueCol = isFB ? (col === 6 || col === 7) : (col === 3 || col === 4);
       if (isValueCol) cell.alignment = { vertical: 'middle', horizontal: 'right' };
     }
   });
@@ -239,7 +239,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
 
   const totalsValues = isFB
     ? [null, null, null, null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`]
-    : [null, null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`];
+    : [null, null, `Total vendido: $${fmt(totalSold)}`, `Total gasto: $${fmt(totalSpent)}`];
 
   const totalsRow = ws.addRow(totalsValues);
   for (let col = 1; col <= numCols; col++) {
@@ -247,7 +247,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
     cell.fill = fills.darkBlue;
     cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: WHITE } };
     cell.border = border;
-    const isLabelCol = isFB ? col >= 6 : col >= 4;
+    const isLabelCol = isFB ? col >= 6 : col >= 3;
     cell.alignment = { vertical: 'middle', horizontal: isLabelCol ? 'center' : 'left' };
   }
 
@@ -257,7 +257,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
 
   const profitValues = isFB
     ? [null, null, null, null, null, 'LUCRO FINAL:', profitStr]
-    : [null, null, null, 'LUCRO FINAL:', profitStr];
+    : [null, null, 'LUCRO FINAL:', profitStr];
 
   const profitRow = ws.addRow(profitValues);
   for (let col = 1; col <= numCols; col++) {
@@ -265,7 +265,7 @@ async function generateWorkbook(allCampaigns, reportDate, platform) {
     cell.fill = fills.cyan;
     cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: WHITE } };
     cell.border = border;
-    const isLabelCol = isFB ? col >= 6 : col >= 4;
+    const isLabelCol = isFB ? col >= 6 : col >= 3;
     cell.alignment = { vertical: 'middle', horizontal: isLabelCol ? 'center' : 'left' };
   }
 
